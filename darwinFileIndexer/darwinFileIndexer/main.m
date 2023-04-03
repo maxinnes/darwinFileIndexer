@@ -2,13 +2,17 @@
 #import <sqlite3.h>
 #import <unistd.h>
 
-// Declare a global variable for progress
+// Declare a global variable for the SQLite database
 sqlite3 *database;
+
+// Declare a global variable for progress tracking
 NSProgress *progress;
 
+// Declare global variables for batch size and the current batch
 NSUInteger batchSize = 1000;
 NSUInteger currentBatch = 0;
 
+// Function to create a table in the SQLite database
 void createTable() {
     char *error;
     const char *sql = "CREATE TABLE IF NOT EXISTS file_info (id INTEGER PRIMARY KEY AUTOINCREMENT, inode INTEGER, owner TEXT, permissions TEXT, path TEXT, created_date TEXT, modified_date TEXT, size INTEGER, isDirectory BOOLEAN NOT NULL);";
@@ -18,6 +22,7 @@ void createTable() {
     }
 }
 
+// Function to count the number of items in a directory
 unsigned long long countItemsInDirectory(NSString *path) {
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSDirectoryEnumerator *enumerator = [fileManager enumeratorAtURL:[NSURL fileURLWithPath:path] includingPropertiesForKeys:@[NSURLNameKey, NSURLIsDirectoryKey] options:0 errorHandler:nil];
@@ -31,6 +36,7 @@ unsigned long long countItemsInDirectory(NSString *path) {
     return count;
 }
 
+// Function to insert data into the SQLite database
 void insertData(NSNumber *inode, NSString *owner, NSString *permissions, NSString *path, NSString *createdDate, NSString *modifiedDate, NSNumber *size, BOOL isDirectory) {
     NSString *sql = @"INSERT INTO file_info (inode, owner, permissions, path, created_date, modified_date, size, isDirectory) VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
     sqlite3_stmt *statement;
@@ -53,6 +59,7 @@ void insertData(NSNumber *inode, NSString *owner, NSString *permissions, NSStrin
     sqlite3_finalize(statement);
 }
 
+// Recursive function to scan directories and collect file information
 void scanDirectory(NSString *path, NSUInteger maxDepth, NSSet *excludeDirectories) {
     if (maxDepth == 0) {
         return;
@@ -85,16 +92,19 @@ void scanDirectory(NSString *path, NSUInteger maxDepth, NSSet *excludeDirectorie
         NSString *modifiedDate = [NSString stringWithFormat:@"%@", attributes[NSFileModificationDate]];
         NSNumber *size = attributes[NSFileSize];
 
+        // Call the insertData function to insert the data into the SQLite database
         insertData(inode, owner, permissions, url.path, createdDate, modifiedDate, size, [isDirectory boolValue]);
 
         currentBatch++;
 
+        // If the current item is a directory, call the scanDirectory
         if ([isDirectory boolValue]) {
             scanDirectory(url.path, maxDepth - 1, excludeDirectories);
         }
     }
 }
 
+// Main function
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         // Declare variables to store parsed arguments
@@ -120,6 +130,7 @@ int main(int argc, const char *argv[]) {
         NSString *dbPath = [NSHomeDirectory() stringByAppendingPathComponent:@"file_info.db"];
 
         if (sqlite3_open([dbPath UTF8String], &database) == SQLITE_OK) {
+            // Create a table in the SQLite database
             createTable();
 
             // Initialize progress and start counting items
@@ -129,7 +140,7 @@ int main(int argc, const char *argv[]) {
             // Begin the transaction
             sqlite3_exec(database, "BEGIN;", 0, 0, 0);
 
-            // Modify the scanDirectory call in the main function
+            // Call the scanDirectory function to start scanning the root directory
             scanDirectory(@"/", maxDepth, excludeDirectories);
 
             // Commit the final batch
